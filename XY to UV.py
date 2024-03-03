@@ -74,6 +74,11 @@ class command_created (adsk.core.CommandCreatedEventHandler):
         command.execute.add(onExecute)
         handlers.append(onExecute)
 
+        # Connect to the input changed event
+        on_input_changed = command_input_changed()
+        command.inputChanged.add(on_input_changed)
+        handlers.append(on_input_changed)
+
         # create the sketch selection input
         sketch_selection_input = inputs.addSelectionInput('sketch_select', 'Sketch', 'Select the sketch')
         sketch_selection_input.addSelectionFilter('Sketches')
@@ -90,6 +95,24 @@ class command_created (adsk.core.CommandCreatedEventHandler):
         # create debug checkbox
         inputs.addBoolValueInput('debug', 'Debug', True, '', False)
 
+# Event handler for the inputChanged event.
+class command_input_changed (adsk.core.InputChangedEventHandler):
+    def __init__(self):
+        super().__init__()
+    def notify(self, args):
+        try:
+            event_args = adsk.core.InputChangedEventArgs.cast(args)
+            inputs = event_args.inputs
+
+            if event_args.input.id == 'sketch_select':
+                sketch_selection_input = inputs.itemById('sketch_select')
+                if sketch_selection_input.selectionCount == 1:
+                    face_selection_input = inputs.itemById ('face_select')
+                    face_selection_input.hasFocus = True
+
+        except:
+            ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+            
 # Event handler for the execute event.
 class command_executed (adsk.core.CommandEventHandler):
     def __init__(self):
@@ -181,13 +204,47 @@ def create_3D_curves (root_component, xy_sketch, face, xy_curves):
         xy_range_min = xy_sketch.boundingBox.minPoint
         xy_range_max = xy_sketch.boundingBox.maxPoint
         
-        # calculate size of xy sketch; assumes all sketches return coordinates in local xy space
+        # calculate size of xy sketch; for some reason, sketch bounding box doesn't include points in the calculation
 
+        min_x = 100000
+        max_x = -min_x        
+        min_y = 100000
+        max_y = -min_y
+        i = 0
+        for p in xy_sketch.sketchPoints:
+            if i != 0:
+                if p.geometry.x < min_x:
+                    min_x = p.geometry.x
+                if p.geometry.x > max_x:
+                    max_x = p.geometry.x
+                if p.geometry.y < min_y:
+                    min_y = p.geometry.y
+                if p.geometry.y > max_y:
+                    max_y = p.geometry.y
+            i = i + 1    
+            debug_print (f'pt {i} =({p.geometry.x:.3f}, {p.geometry.y:.3f})')
+            
+        debug_print (f'min x = {min_x:.2f}')
+        debug_print (f'max x = {max_x:.2f}')        
+        debug_print (f'min y = {min_y:.2f}')
+        debug_print (f'max y = {max_y:.2f}')
+
+        x_range = max_x - min_x
+        y_range = max_y - min_y
+
+        xy_range_min.x = min_x
+        xy_range_min.y = min_y
+        xy_range_max.x = max_x
+        xy_range_max.y = max_y
+        
+            
         x_range = xy_range_max.x - xy_range_min.x
         y_range = xy_range_max.y - xy_range_min.y
+        z_range = 0.0 #xy_range_max.z - xy_range_min.z  
 
         debug_print (f'x ranges [{xy_range_min.x:.3f}, {xy_range_max.x:.3f}] = {x_range:.3f}')
         debug_print (f'y ranges [{xy_range_min.y:.3f}, {xy_range_max.y:.3f}] = {y_range:.3f}')
+        debug_print (f'z ranges [{xy_range_min.z:.3f}, {xy_range_max.z:.3f}] = {z_range:.3f}')
         
         # find parametric range of face where the mapping will be applied
         uv_range_bounding_box = surface_evaluator.parametricRange()
@@ -223,6 +280,7 @@ def create_3D_curves (root_component, xy_sketch, face, xy_curves):
 
                 start_point = xy_curve.geometry.startPoint
                 end_point = xy_curve.geometry.endPoint
+                
 
                 if not swap_uv: 
                     x0 = ((start_point.x - xy_range_min.x) * x_scale) + uv_range_min.x
